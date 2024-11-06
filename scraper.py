@@ -18,6 +18,7 @@ CHROMIUM_ISSUES_URL = "https://issues.chromium.org/issues"
 SEARCH_QUERY = "?q=status:open"
 OUTPUT_DIR = 'scraped_data'
 
+
 def generate_dynamic_headers():
     """Generate headers dynamically based on URL and timestamp."""
     chrome_version = "130.0.0.0"
@@ -31,11 +32,11 @@ def generate_dynamic_headers():
         "Content-Type": "application/json"
     }
 
+
 # Fetching open issues from Chromium Issue Tracker
 async def fetch_new_issues(db, p):
     url = CHROMIUM_ISSUES_URL + SEARCH_QUERY
     print(f"Issue URL: {url}")
-
 
     headers = generate_dynamic_headers()
     browser = await p.chromium.launch(channel='chrome', headless=True)
@@ -48,7 +49,6 @@ async def fetch_new_issues(db, p):
         await page.goto(url, timeout=60000, wait_until='networkidle')
         content = await page.content()
 
-
     except Exception as e:
         print(f"Error scraping {url}: {e}")
         return []
@@ -57,6 +57,7 @@ async def fetch_new_issues(db, p):
     issues = await extract_issues(content)
     await save_issues(db, issues)
     return
+
 
 async def save_html(url, content):
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -68,6 +69,7 @@ async def save_html(url, content):
     with open(html_path, 'w', encoding='utf-8') as f:
         f.write(content)
     print(f"Saved HTML content to {html_path}")
+    
 
 async def extract_issues(content):
     soup = BeautifulSoup(content, 'html.parser')
@@ -90,6 +92,7 @@ async def extract_issues(content):
 
     return issues
 
+
 async def save_issues(db, issues):
     for issue in issues:
         await db.execute('INSERT OR IGNORE INTO issues (id, url, title) VALUES (?, ?, ?)', (issue['issue_id'], issue['url'], issue['title']))
@@ -107,6 +110,8 @@ async def init_db():
     ''')
     await db.commit()
     return db
+
+
 async def main():
     db = await init_db()
 
@@ -116,5 +121,7 @@ async def main():
 
     await db.close()
     return
+
+
 if __name__ == '__main__':
     asyncio.run(main())
