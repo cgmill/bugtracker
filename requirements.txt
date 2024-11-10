@@ -1,0 +1,7 @@
+aiohttp
+markdown
+playwright
+beautifulsoup4
+aiosqlite
+icecream
+pathlib
