@@ -15,8 +15,10 @@ from pathlib import Path
 # Setup 
 DOMAIN = 'issues.chromium.org'
 CHROMIUM_ISSUES_URL = "https://issues.chromium.org/issues"
-SEARCH_QUERY = "?q=status:open"
+FILTERS = [ "status:open", "created>2024-10-08" ] # Get a reasonable number of issues for now
 OUTPUT_DIR = 'scraped_data'
+NOW = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
 
 
 def generate_dynamic_headers():
@@ -35,7 +37,7 @@ def generate_dynamic_headers():
 
 # Fetching open issues from Chromium Issue Tracker
 async def fetch_new_issues(db, p):
-    url = CHROMIUM_ISSUES_URL + SEARCH_QUERY
+    url = CHROMIUM_ISSUES_URL + "?q=" + "%20".join(FILTERS)
     print(f"Issue URL: {url}")
 
     headers = generate_dynamic_headers()
@@ -53,15 +55,15 @@ async def fetch_new_issues(db, p):
         print(f"Error scraping {url}: {e}")
         return []
 
-    await save_html(url, content)
+    await save_raw(url, content)
     issues = await extract_issues(content)
     await save_issues(db, issues)
     return
 
 
-async def save_html(url, content):
+async def save_raw(url, content):
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f"{timestamp}_{url.replace('/', '_').replace(':', '_').replace('?', '_').replace('&', '_')}"
+    filename = f"{timestamp}_new_chromium_issues"
     output_dir = Path(OUTPUT_DIR)
     output_dir.mkdir(exist_ok=True)
 
@@ -69,7 +71,8 @@ async def save_html(url, content):
     with open(html_path, 'w', encoding='utf-8') as f:
         f.write(content)
     print(f"Saved HTML content to {html_path}")
-    
+    return
+
 
 async def extract_issues(content):
     soup = BeautifulSoup(content, 'html.parser')
@@ -82,7 +85,7 @@ async def extract_issues(content):
         title_link = row.find('a', class_='row-issue-title')
 
         if title_link:
-            url = f"https://issues.chromium.org{title_link['href']}"
+            url = f"https://issues.chromium.org/{title_link['href']}"
             title = title_link.get('title')
             issues.append({
                 'issue_id': issue_id,
@@ -95,7 +98,7 @@ async def extract_issues(content):
 
 async def save_issues(db, issues):
     for issue in issues:
-        await db.execute('INSERT OR IGNORE INTO issues (id, url, title) VALUES (?, ?, ?)', (issue['issue_id'], issue['url'], issue['title']))
+        await db.execute('INSERT OR IGNORE INTO issues (id, url, title, visible, last_checked) VALUES (?, ?, ?, ?, ?)', (issue['issue_id'], issue['url'], issue['title'], 1, NOW))
         await db.commit()
 
 
@@ -105,19 +108,52 @@ async def init_db():
         CREATE TABLE IF NOT EXISTS issues (
             id TEXT PRIMARY KEY,
             url TEXT,
-            title TEXT
+            title TEXT,
+            visible BOOLEAN,
+            last_checked DATETIME
         )
     ''')
     await db.commit()
     return db
+
+async def new_page (p):
+    headers = generate_dynamic_headers()
+    browser = await p.chromium.launch(channel='chrome', headless=True)
+    context = await browser.new_context()
+    page = await context.new_page()
+    await page.set_viewport_size({"width":1920, "height":1080})
+    await page.set_extra_http_headers(headers)
+    return page
+
+async def check_issues(db, p):
+    past_issues = 'SELECT * FROM issues WHERE visible=1 AND last_checked < ? LIMIT 5' # Limiting to 5 issues for testing
+    async with await db.execute(past_issues, (NOW,)) as cursor:
+        async for row in cursor:
+            url = row[1]
+            page = await new_page(p)
+
+            try:
+                response = await page.goto(url, timeout=60000, wait_until='networkidle')
+
+            except Exception as e:
+                print(f"Error scraping {url}: {e}")
+                return []
+
+            if response.ok:
+                print(f"Issue {row[0]} is still visible")
+            
+            await db.execute('UPDATE issues SET visible=?, last_checked=? WHERE id=?', (1 if response.ok else 0, NOW, row[0]))
+            await db.commit()
+
+            
 
 
 async def main():
     db = await init_db()
 
     async with async_playwright() as p:
-        await fetch_open_issues(p)
-        await fetch_new_issues(db, p)
+#        await fetch_new_issues(db, p)
+        await check_issues(db, p)
 
     await db.close()
     return
