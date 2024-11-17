@@ -1,9 +1,6 @@
 # Overview
 The goal is to monitor issues submitted to various bug trackers.
 
-# In Progres:
-- [ ] 
-
 # TODO:
 - [X] Fetch issues and store in DB
 - [X] Add parameters to fetch issues back to a certain date
