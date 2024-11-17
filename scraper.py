@@ -50,39 +50,38 @@ async def fetch_new_issues(db, p):
     await page.set_viewport_size({"width":1920, "height":1080})
     await page.set_extra_http_headers(headers)
 
-    p = 1
-    while p < 50: # get a maximum of 50 pages of issues. Need a better way to do this eventually.
+    await page.goto(url + f"&p={p}", timeout=60000, wait_until='networkidle')
+    p = 0
+    while p < 50: # get a maximum of 50 pages of issues for testing. should stop before that
         try:
-            print(f"fetching page {p}")
-            await page.goto(url + f"&p={p}", timeout=60000, wait_until='networkidle') # networkidle makes sure the redirect has happened if i run out of pages to fetch
-
-            new_url = page.url
-            print(f"new url: {new_url}")
-            parsed_url = urlparse(new_url)
-            new_p = parse_qs(parsed_url.query)['p'][0]
-            print(f"new p: {new_p}")
-            if p != int(new_p):
-                print("new page is back to page 1, stopping")
-                break
+            await page.wait_for_load_state('networkidle')
             content = await page.content()
-            await save_raw(url, content)
+            await save_raw(url, p, content)
             issues = await extract_issues(content)
             await save_issues(db, issues)
-            p += 1
+            
+            np_button = page.get_by_role("button", name="Go to next page")
+            if not await np_button.is_disabled():
+                await np_button.click()
+            else:
+                print("No next page button found, stopping")
+                break
 
         except Exception as e:
             print(f"Error scraping {url}: {e}")
             return
+
+        p += 1
     return
 
 
-async def save_raw(url, content):
+async def save_raw(url, p, content):
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     filename = f"{timestamp}_new_chromium_issues"
     output_dir = Path(OUTPUT_DIR)
     output_dir.mkdir(exist_ok=True)
 
-    html_path = output_dir / f'{filename}.html'
+    html_path = output_dir / f'{filename}_p{p}.html'
     with open(html_path, 'w', encoding='utf-8') as f:
         f.write(content)
     print(f"Saved HTML content to {html_path}")
